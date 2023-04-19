@@ -26,12 +26,21 @@
         <relativePath>../../pom.xml</relativePath>
     </parent>
 
+    <version>1.1.5</version>
     <modelVersion>4.0.0</modelVersion>
     <artifactId>org.wso2.carbon.identity.oauth2.grant.organizationswitch</artifactId>
     <name>WSO2 - Organization Switch Grant Type</name>
     <packaging>bundle</packaging>
 
     <dependencies>
+        <dependency>
+            <groupId>org.wso2.orbit.com.nimbusds</groupId>
+            <artifactId>nimbus-jose-jwt</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.nimbusds</groupId>
+            <artifactId>oauth2-oidc-sdk</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.apache.oltu.oauth2</groupId>
             <artifactId>org.apache.oltu.oauth2.client</artifactId>
@@ -66,6 +75,14 @@
                 <extensions>true</extensions>
                 <configuration>
                     <instructions>
+                        <Embed-Dependency>
+                            <groupId>com.nimbusds</groupId>
+                            <artifactId>oauth2-oidc-sdk</artifactId>
+                        </Embed-Dependency>
+                        <Embed-Dependency>
+                                <groupId>javax.servlet</groupId>
+                                <artifactId>javax.servlet-api</artifactId>
+                        </Embed-Dependency>
                         <Bundle-SymbolicName>${project.artifactId}</Bundle-SymbolicName>
                         <Bundle-Name>${project.artifactId}</Bundle-Name>
                         <Bundle-Description>Organization Switch Grant Bundle</Bundle-Description>
@@ -99,6 +116,9 @@
                             org.wso2.carbon.user.core.service;version="${carbon.kernel.package.import.version.range}",
                             org.wso2.carbon.user.core.tenant;version="${carbon.kernel.package.import.version.range}",
                             org.wso2.carbon.user.core.common;version="${carbon.kernel.package.import.version.range}",
+                            com.nimbusds.oauth2.sdk.token;version="8.36.2",
+                            com.nimbusds.oauth2.sdk.*;version="8.36.2",
+                            javax.servlet,
                         </Import-Package>
                     </instructions>
                 </configuration>

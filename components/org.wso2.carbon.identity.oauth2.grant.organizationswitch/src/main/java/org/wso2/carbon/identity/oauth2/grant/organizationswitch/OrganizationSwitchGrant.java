@@ -23,8 +23,6 @@ import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.wso2.carbon.identity.application.authentication.framework.exception.UserIdNotFoundException;
 import org.wso2.carbon.identity.application.authentication.framework.model.AuthenticatedUser;
-import org.wso2.carbon.identity.application.common.model.FederatedAuthenticatorConfig;
-import org.wso2.carbon.identity.application.common.model.IdentityProvider;
 import org.wso2.carbon.identity.application.common.model.User;
 import org.wso2.carbon.identity.oauth2.IdentityOAuth2Exception;
 import org.wso2.carbon.identity.oauth2.OAuth2TokenValidationService;
@@ -36,26 +34,18 @@ import org.wso2.carbon.identity.oauth2.grant.organizationswitch.exception.Organi
 import org.wso2.carbon.identity.oauth2.grant.organizationswitch.internal.OrganizationSwitchGrantDataHolder;
 import org.wso2.carbon.identity.oauth2.grant.organizationswitch.util.OrganizationSwitchGrantConstants;
 import org.wso2.carbon.identity.oauth2.grant.organizationswitch.util.OrganizationSwitchGrantUtil;
-import org.wso2.carbon.identity.oauth2.model.AccessTokenDO;
 import org.wso2.carbon.identity.oauth2.model.RequestParameter;
 import org.wso2.carbon.identity.oauth2.token.OAuthTokenReqMessageContext;
 import org.wso2.carbon.identity.oauth2.token.handlers.grant.AbstractAuthorizationGrantHandler;
-import org.wso2.carbon.identity.oauth2.util.OAuth2Util;
 import org.wso2.carbon.identity.organization.management.service.OrganizationManager;
 import org.wso2.carbon.identity.organization.management.service.OrganizationManagerImpl;
 import org.wso2.carbon.identity.organization.management.service.exception.OrganizationManagementException;
 
-import java.util.Arrays;
 import java.util.Optional;
 
-import static java.util.Objects.nonNull;
-import static java.util.Optional.ofNullable;
-import static org.apache.commons.lang.StringUtils.equalsIgnoreCase;
 import static org.apache.commons.lang.StringUtils.isBlank;
-import static org.wso2.carbon.identity.oauth2.grant.organizationswitch.util.OrganizationSwitchGrantConstants.ORGANIZATION_AUTHENTICATOR;
 import static org.wso2.carbon.identity.organization.management.service.constant.OrganizationManagementConstants.ErrorMessages.ERROR_CODE_ERROR_RESOLVING_TENANT_DOMAIN_FROM_ORGANIZATION_DOMAIN;
 import static org.wso2.carbon.identity.organization.management.service.constant.OrganizationManagementConstants.ErrorMessages.ERROR_CODE_ERROR_RETRIEVING_AUTHENTICATED_USER;
-import static org.wso2.carbon.user.core.UserCoreConstants.TENANT_DOMAIN_COMBINER;
 
 /**
  * Implements the AuthorizationGrantHandler for the OrganizationSwitch grant type.
@@ -65,6 +55,7 @@ public class OrganizationSwitchGrant extends AbstractAuthorizationGrantHandler {
     private static final Log LOG = LogFactory.getLog(OrganizationSwitchGrant.class);
 
     public OrganizationManager organizationManager = new OrganizationManagerImpl();
+    private  TokenContextBuilder tokenContextBuilder = new AbstractTokenContextBuilder();
 
     @Override
     public boolean validateGrant(OAuthTokenReqMessageContext tokReqMsgCtx) throws IdentityOAuth2Exception {
@@ -74,63 +65,23 @@ public class OrganizationSwitchGrant extends AbstractAuthorizationGrantHandler {
         String token = extractParameter(OrganizationSwitchGrantConstants.Params.TOKEN_PARAM, tokReqMsgCtx);
         String organizationId = extractParameter(OrganizationSwitchGrantConstants.Params.ORG_PARAM, tokReqMsgCtx);
 
-        OAuth2TokenValidationResponseDTO validationResponseDTO = validateToken(token);
+        if (isBlank(token)) {
+            LOG.error("Error occurred while validating access token.");
+            throw new OrganizationSwitchGrantException("Token is empty.","Error occurred while validating access token.","CODE-1234");
+        } else {
+            try {
+                IntrospectionResponse introspectionResponse;
+                String tenantDomain = getTenantDomainFromOrganizationId(organizationId);
+                introspectionResponse = tokenContextBuilder.getTokenContext(token, tenantDomain);
+                AuthenticatedUser authenticatedUser = new AuthenticatedUser();
+                authenticatedUser.setUserName(introspectionResponse.getUsername());
+                authenticatedUser.setUserStoreDomain("ASGARDEO-USER");
+                authenticatedUser.setTenantDomain(introspectionResponse.getTenantDomain());
 
-        if (!validationResponseDTO.isValid()) {
-            LOG.debug("Access token validation failed.");
-
-            throw new IdentityOAuth2Exception("Invalid token received.");
-        }
-
-        LOG.debug("Access token validation success.");
-
-        AccessTokenDO tokenDO = OAuth2Util.findAccessToken(token, false);
-        AuthenticatedUser authorizedUser = nonNull(tokenDO) ? tokenDO.getAuthzUser() :
-                AuthenticatedUser.createLocalAuthenticatedUserFromSubjectIdentifier(
-                        validationResponseDTO.getAuthorizedUser());
-
-        AuthenticatedUser authenticatedUser = new AuthenticatedUser();
-        authenticatedUser.setUserName(authorizedUser.getUserName());
-        authenticatedUser.setUserStoreDomain(authorizedUser.getUserStoreDomain());
-        authenticatedUser.setTenantDomain(getTenantDomainFromOrganizationId(organizationId));
-
-        String userId = null;
-        if (authorizedUser.isFederatedUser()) {
-            IdentityProvider idp = OAuth2Util.getIdentityProvider(authorizedUser.getFederatedIdPName(),
-                    authorizedUser.getTenantDomain());
-            if (equalsIgnoreCase(ORGANIZATION_AUTHENTICATOR,
-                    ofNullable(idp.getDefaultAuthenticatorConfig()).map(FederatedAuthenticatorConfig::getName)
-                            .orElse(null))) {
-                // If the user bound to the token is a federated user and the user is authenticated via
-                // OrganizationLogin Authenticator accessing the organization_switch grant, the user ID is populated
-                // as the username.
-                userId = authorizedUser.getUserName();
-            } else {
-                Optional<org.wso2.carbon.user.core.common.User> optionalUser =
-                        getFederatedUserFromResidentOrganization(authorizedUser.getUserName(), organizationId);
-                if (optionalUser.isPresent()) {
-                    userId = optionalUser.get().getUserID();
-                    authenticatedUser.setUserStoreDomain(optionalUser.get().getUserStoreDomain());
-                    authenticatedUser.setAuthenticatedSubjectIdentifier(optionalUser.get().getUsername() +
-                            TENANT_DOMAIN_COMBINER + authenticatedUser.getTenantDomain());
-                }
+            } catch (Exception e) {
+                LOG.error("Error occurred while validating access token.");
+                throw new OrganizationSwitchGrantException("Error occurred while validating access token.","Error occurred while validating access token.","CODE-1234");
             }
-        }
-
-        if (isBlank(userId)) {
-            userId = getUserIdFromAuthorizedUser(authorizedUser);
-        }
-
-        authenticatedUser.setUserId(userId);
-
-        tokReqMsgCtx.setAuthorizedUser(authenticatedUser);
-
-        String[] allowedScopes = tokReqMsgCtx.getOauth2AccessTokenReqDTO().getScope();
-        tokReqMsgCtx.setScope(allowedScopes);
-
-        if (LOG.isDebugEnabled()) {
-            LOG.debug("Issuing an access token for user: " + authenticatedUser + " with scopes: " +
-                    Arrays.toString(tokReqMsgCtx.getScope()));
         }
 
         return true;
@@ -213,3 +164,4 @@ public class OrganizationSwitchGrant extends AbstractAuthorizationGrantHandler {
     }
 
 }
+
