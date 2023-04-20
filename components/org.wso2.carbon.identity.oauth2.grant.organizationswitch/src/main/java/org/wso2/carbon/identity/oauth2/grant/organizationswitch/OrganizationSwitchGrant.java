@@ -26,6 +26,7 @@ import org.wso2.carbon.identity.application.authentication.framework.model.Authe
 import org.wso2.carbon.identity.application.common.model.FederatedAuthenticatorConfig;
 import org.wso2.carbon.identity.application.common.model.IdentityProvider;
 import org.wso2.carbon.identity.application.common.model.User;
+import org.wso2.carbon.identity.oauth.internal.OAuthComponentServiceHolder;
 import org.wso2.carbon.identity.oauth2.IdentityOAuth2Exception;
 import org.wso2.carbon.identity.oauth2.OAuth2TokenValidationService;
 import org.wso2.carbon.identity.oauth2.dto.OAuth2ClientApplicationDTO;
@@ -47,6 +48,15 @@ import org.wso2.carbon.identity.organization.management.service.exception.Organi
 
 import java.util.Arrays;
 import java.util.Optional;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.util.Base64;
+import org.json.JSONObject;
+import org.wso2.carbon.user.api.UserStoreException;
+import org.wso2.carbon.user.core.common.AbstractUserStoreManager;
+import org.wso2.carbon.user.core.service.RealmService;
 
 import static java.util.Objects.nonNull;
 import static java.util.Optional.ofNullable;
@@ -69,59 +79,70 @@ public class OrganizationSwitchGrant extends AbstractAuthorizationGrantHandler {
     @Override
     public boolean validateGrant(OAuthTokenReqMessageContext tokReqMsgCtx) throws IdentityOAuth2Exception {
 
+        String introspectionUrl = "https://localhost:9443/t/testasgardeo2/oauth2/introspect";
+        String accessToken = "";
+        String clientId = "";
+        String clientSecret = "";
+
         super.validateGrant(tokReqMsgCtx);
 
         String token = extractParameter(OrganizationSwitchGrantConstants.Params.TOKEN_PARAM, tokReqMsgCtx);
         String organizationId = extractParameter(OrganizationSwitchGrantConstants.Params.ORG_PARAM, tokReqMsgCtx);
 
-        OAuth2TokenValidationResponseDTO validationResponseDTO = validateToken(token);
+        accessToken = token;
 
-        if (!validationResponseDTO.isValid()) {
-            LOG.debug("Access token validation failed.");
+        String authString = clientId + ":" + clientSecret;
+        String authEncoded = Base64.getEncoder().encodeToString(authString.getBytes());
+        String response = "";
+        // Construct the introspection request
+        try {
+            String requestBody = "token=" + accessToken;
+            URL url = new URL(introspectionUrl);
+            HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+            connection.setRequestMethod("POST");
+            connection.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
+            connection.setRequestProperty("Authorization", "Basic " + authEncoded);
+            connection.setDoOutput(true);
+            connection.getOutputStream().write(requestBody.getBytes());
 
-            throw new IdentityOAuth2Exception("Invalid token received.");
+            // Read and validate the introspection response
+            BufferedReader in = new BufferedReader(new InputStreamReader(connection.getInputStream()));
+            response = in.readLine();
+            if (response.contains("\"active\":true")) {
+                System.out.println("The access token is valid.");
+            } else {
+                System.out.println("The access token is not valid.");
+            }
+            in.close();
+        } catch (Exception e) {
+            e.printStackTrace();
         }
 
-        LOG.debug("Access token validation success.");
-
-        AccessTokenDO tokenDO = OAuth2Util.findAccessToken(token, false);
-        AuthenticatedUser authorizedUser = nonNull(tokenDO) ? tokenDO.getAuthzUser() :
-                AuthenticatedUser.createLocalAuthenticatedUserFromSubjectIdentifier(
-                        validationResponseDTO.getAuthorizedUser());
-
-        AuthenticatedUser authenticatedUser = new AuthenticatedUser();
-        authenticatedUser.setUserName(authorizedUser.getUserName());
-        authenticatedUser.setUserStoreDomain(authorizedUser.getUserStoreDomain());
-        authenticatedUser.setTenantDomain(getTenantDomainFromOrganizationId(organizationId));
-
+        JSONObject jsonObject = new JSONObject(response);
+        String username = jsonObject.getString("username");
         String userId = null;
-        if (authorizedUser.isFederatedUser()) {
-            IdentityProvider idp = OAuth2Util.getIdentityProvider(authorizedUser.getFederatedIdPName(),
-                    authorizedUser.getTenantDomain());
-            if (equalsIgnoreCase(ORGANIZATION_AUTHENTICATOR,
-                    ofNullable(idp.getDefaultAuthenticatorConfig()).map(FederatedAuthenticatorConfig::getName)
-                            .orElse(null))) {
-                // If the user bound to the token is a federated user and the user is authenticated via
-                // OrganizationLogin Authenticator accessing the organization_switch grant, the user ID is populated
-                // as the username.
-                userId = authorizedUser.getUserName();
-            } else {
-                Optional<org.wso2.carbon.user.core.common.User> optionalUser =
-                        getFederatedUserFromResidentOrganization(authorizedUser.getUserName(), organizationId);
-                if (optionalUser.isPresent()) {
-                    userId = optionalUser.get().getUserID();
-                    authenticatedUser.setUserStoreDomain(optionalUser.get().getUserStoreDomain());
-                    authenticatedUser.setAuthenticatedSubjectIdentifier(optionalUser.get().getUsername() +
-                            TENANT_DOMAIN_COMBINER + authenticatedUser.getTenantDomain());
-                }
-            }
+        AuthenticatedUser authenticatedUser = new AuthenticatedUser();
+        authenticatedUser.setUserName(username.substring(0, username.lastIndexOf("@")));
+        authenticatedUser.setUserStoreDomain("PRIMARY");
+        authenticatedUser.setTenantDomain(getTenantDomainFromOrganizationId(organizationId));
+        RealmService realmService = OrganizationSwitchGrantDataHolder.getInstance().getRealmService();
+        int tenantId = 0;
+        AbstractUserStoreManager userStoreManager;
+        try {
+            tenantId = realmService.getTenantManager().getTenantId(authenticatedUser.getTenantDomain());
+            userStoreManager
+                = (AbstractUserStoreManager) realmService.getTenantUserRealm(tenantId).getUserStoreManager();
+            userId = userStoreManager.getUserIDFromUserName(authenticatedUser.getUserName());
+        } catch (UserStoreException e) {
+            e.printStackTrace();
         }
 
         if (isBlank(userId)) {
-            userId = getUserIdFromAuthorizedUser(authorizedUser);
+            userId = getUserIdFromAuthorizedUser(authenticatedUser);
         }
 
         authenticatedUser.setUserId(userId);
+
 
         tokReqMsgCtx.setAuthorizedUser(authenticatedUser);
 

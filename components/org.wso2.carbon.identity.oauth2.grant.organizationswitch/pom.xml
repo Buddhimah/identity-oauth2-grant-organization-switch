@@ -99,6 +99,7 @@
                             org.wso2.carbon.user.core.service;version="${carbon.kernel.package.import.version.range}",
                             org.wso2.carbon.user.core.tenant;version="${carbon.kernel.package.import.version.range}",
                             org.wso2.carbon.user.core.common;version="${carbon.kernel.package.import.version.range}",
+                            org.json,
                         </Import-Package>
                     </instructions>
                 </configuration>

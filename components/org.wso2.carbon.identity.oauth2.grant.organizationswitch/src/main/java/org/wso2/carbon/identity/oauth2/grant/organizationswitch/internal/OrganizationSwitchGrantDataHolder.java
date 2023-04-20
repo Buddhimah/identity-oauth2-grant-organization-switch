@@ -20,6 +20,7 @@ package org.wso2.carbon.identity.oauth2.grant.organizationswitch.internal;
 
 
 import org.wso2.carbon.identity.organization.management.service.OrganizationUserResidentResolverService;
+import org.wso2.carbon.user.core.service.RealmService;
 
 /**
  * Organization switch grant data holder.
@@ -29,6 +30,7 @@ public class OrganizationSwitchGrantDataHolder {
     private static OrganizationSwitchGrantDataHolder instance = new OrganizationSwitchGrantDataHolder();
 
     private OrganizationUserResidentResolverService organizationUserResidentResolverService;
+    private RealmService realmService;
 
     public static OrganizationSwitchGrantDataHolder getInstance() {
 
@@ -44,5 +46,13 @@ public class OrganizationSwitchGrantDataHolder {
             (OrganizationUserResidentResolverService organizationUserResidentResolverService) {
 
         this.organizationUserResidentResolverService = organizationUserResidentResolverService;
+    }
+
+    public RealmService getRealmService() {
+        return realmService;
+    }
+
+    public void setRealmService(RealmService realmService) {
+        this.realmService = realmService;
     }
 }

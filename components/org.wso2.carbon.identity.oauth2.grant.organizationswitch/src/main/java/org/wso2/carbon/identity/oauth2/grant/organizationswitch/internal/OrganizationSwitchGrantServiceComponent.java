@@ -24,7 +24,10 @@ import org.osgi.service.component.annotations.Component;
 import org.osgi.service.component.annotations.Reference;
 import org.osgi.service.component.annotations.ReferenceCardinality;
 import org.osgi.service.component.annotations.ReferencePolicy;
+import org.wso2.carbon.identity.oauth.internal.OAuthComponentServiceHolder;
+import org.wso2.carbon.identity.oauth2.grant.organizationswitch.OrganizationSwitchGrant;
 import org.wso2.carbon.identity.organization.management.service.OrganizationUserResidentResolverService;
+import org.wso2.carbon.user.core.service.RealmService;
 
 /**
  * This class contains the service component of the organization switching grant type.
@@ -54,5 +57,28 @@ public class OrganizationSwitchGrantServiceComponent {
 
         LOG.debug("Organization user resident resolver service is unset.");
         OrganizationSwitchGrantDataHolder.getInstance().setOrganizationUserResidentResolverService(null);
+    }
+
+    @Reference(
+            name = "realm.service",
+            service = RealmService.class,
+            cardinality = ReferenceCardinality.MANDATORY,
+            policy = ReferencePolicy.DYNAMIC,
+            unbind = "unsetRealmService"
+    )
+    protected void setRealmService(RealmService realmService) {
+
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("Setting the Realm Service");
+        }
+        OrganizationSwitchGrantDataHolder.getInstance().setRealmService(realmService);
+    }
+
+    protected void unsetRealmService(RealmService realmService) {
+
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("Unsetting the Realm Service");
+        }
+        OrganizationSwitchGrantDataHolder.getInstance().setRealmService(null);
     }
 }
