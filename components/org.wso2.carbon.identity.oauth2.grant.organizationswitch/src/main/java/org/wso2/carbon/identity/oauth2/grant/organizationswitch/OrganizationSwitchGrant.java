@@ -18,9 +18,11 @@
 
 package org.wso2.carbon.identity.oauth2.grant.organizationswitch;
 
+import com.google.gson.JsonParser;
 import org.apache.commons.lang.ArrayUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.opensaml.xmlsec.signature.impl.PublicKeyBuilder;
 import org.wso2.carbon.identity.application.authentication.framework.exception.UserIdNotFoundException;
 import org.wso2.carbon.identity.application.authentication.framework.model.AuthenticatedUser;
 import org.wso2.carbon.identity.application.common.model.FederatedAuthenticatorConfig;
@@ -46,6 +48,10 @@ import org.wso2.carbon.identity.organization.management.service.OrganizationMana
 import org.wso2.carbon.identity.organization.management.service.OrganizationManagerImpl;
 import org.wso2.carbon.identity.organization.management.service.exception.OrganizationManagementException;
 
+import java.io.ByteArrayInputStream;
+import java.security.MessageDigest;
+import java.security.cert.CertificateFactory;
+import java.security.cert.X509Certificate;
 import java.util.Arrays;
 import java.util.Optional;
 import java.io.BufferedReader;
@@ -57,6 +63,23 @@ import org.json.JSONObject;
 import org.wso2.carbon.user.api.UserStoreException;
 import org.wso2.carbon.user.core.common.AbstractUserStoreManager;
 import org.wso2.carbon.user.core.service.RealmService;
+import java.nio.charset.StandardCharsets;
+import java.security.KeyFactory;
+import java.security.PublicKey;
+import java.security.spec.X509EncodedKeySpec;
+import java.util.Base64;
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
+
+import org.json.JSONObject;
+import java.nio.charset.StandardCharsets;
+import java.security.Signature;
+import java.security.cert.CertificateFactory;
+import java.security.cert.X509Certificate;
+import java.security.spec.X509EncodedKeySpec;
+import java.util.Base64;
+
+
 
 import static java.util.Objects.nonNull;
 import static java.util.Optional.ofNullable;
@@ -76,53 +99,82 @@ public class OrganizationSwitchGrant extends AbstractAuthorizationGrantHandler {
 
     public OrganizationManager organizationManager = new OrganizationManagerImpl();
 
+    String publicKeyString = "-----BEGIN CERTIFICATE-----\n" +
+            "MIIDqTCCApGgAwIBAgIEYfEVSjANBgkqhkiG9w0BAQsFADBkMQswCQYDVQQGEwJV\n" +
+            "UzELMAkGA1UECAwCQ0ExFjAUBgNVBAcMDU1vdW50YWluIFZpZXcxDTALBgNVBAoM\n" +
+            "BFdTTzIxDTALBgNVBAsMBFdTTzIxEjAQBgNVBAMMCWxvY2FsaG9zdDAeFw0yMjAx\n" +
+            "MjYwOTMyNThaFw0yNDA0MzAwOTMyNThaMGQxCzAJBgNVBAYTAlVTMQswCQYDVQQI\n" +
+            "DAJDQTEWMBQGA1UEBwwNTW91bnRhaW4gVmlldzENMAsGA1UECgwEV1NPMjENMAsG\n" +
+            "A1UECwwEV1NPMjESMBAGA1UEAwwJbG9jYWxob3N0MIIBIjANBgkqhkiG9w0BAQEF\n" +
+            "AAOCAQ8AMIIBCgKCAQEAkdgncoCrz655Lq8pTdX07eoVBjdZDCUE6ueBd0D1hpJ0\n" +
+            "/zE3x3Az6tlvzs98PsPuGzaQOMmuLa4qxNJ+OKxJmutDUlClpuvxuf+jyq4gCV5t\n" +
+            "EIILWRMBjlBEpJfWm63+VKKU4nvBWNJ7KfhWjl8+DUdNSh2pCDLpUObmb9Kquqc1\n" +
+            "x4BgttjN4rx/P+3/v+1jETXzIP1L44yHtpQNv0khYf4j/aHjcEri9ykvpz1mtdac\n" +
+            "brKK25N4V1HHRwDqZiJzOCCISXDuqB6wguY/v4n0l1XtrEs7iCyfRFwNSKNrLqr2\n" +
+            "3tR1CscmLfbH6ZLg5CYJTD+1uPSx0HMOB4Wv51PbWwIDAQABo2MwYTAUBgNVHREE\n" +
+            "DTALgglsb2NhbGhvc3QwHQYDVR0OBBYEFH0KQ3YTZJxTsNsPyrZOSFgXXhG+MB0G\n" +
+            "A1UdJQQWMBQGCCsGAQUFBwMBBggrBgEFBQcDAjALBgNVHQ8EBAMCBPAwDQYJKoZI\n" +
+            "hvcNAQELBQADggEBAFNJ34CIiIlCxmyp27+KA224LaHVtL5DucFK0P22FQ+QKkON\n" +
+            "iUwO70KoVFreBH1Smxu4ePWk6rMZFOM5oL8HXYg3twy+5eGcL3PQd7X5dwAqlViv\n" +
+            "zokoi6SDaA/bIG6J/O1U9Qd4XEVJdVuLqjk1+cp70ALt0X6B7sNLfjFcbz3jQULN\n" +
+            "nK8HNvqbn7zQuP10s8p5y2qVkPBA/pjigRDsIWR6p78QESF+TaHFjxfcD6f9cnYi\n" +
+            "e+yEHERtG8k8x5jLFe+odI1/QGZP8Fy0oKT+E/TJ1FBh4rB1FtKylqGeauPu89Dn\n" +
+            "aJ9+kvpNQ94yFmEuhtDByvDijxAqvlin3TPIfy8=\n" +
+            "-----END CERTIFICATE-----\n";
+
     @Override
     public boolean validateGrant(OAuthTokenReqMessageContext tokReqMsgCtx) throws IdentityOAuth2Exception {
 
-        String introspectionUrl = "https://localhost:9443/t/testasgardeo2/oauth2/introspect";
-        String accessToken = "";
-        String clientId = "";
-        String clientSecret = "";
+
 
         super.validateGrant(tokReqMsgCtx);
 
         String token = extractParameter(OrganizationSwitchGrantConstants.Params.TOKEN_PARAM, tokReqMsgCtx);
         String organizationId = extractParameter(OrganizationSwitchGrantConstants.Params.ORG_PARAM, tokReqMsgCtx);
+        String name = "";
 
-        accessToken = token;
-
-        String authString = clientId + ":" + clientSecret;
-        String authEncoded = Base64.getEncoder().encodeToString(authString.getBytes());
-        String response = "";
         // Construct the introspection request
         try {
-            String requestBody = "token=" + accessToken;
-            URL url = new URL(introspectionUrl);
-            HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-            connection.setRequestMethod("POST");
-            connection.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
-            connection.setRequestProperty("Authorization", "Basic " + authEncoded);
-            connection.setDoOutput(true);
-            connection.getOutputStream().write(requestBody.getBytes());
+            // Parse the JWT token
+            String[] parts = token.split("\\.");
+            String headerJson = new String(Base64.getUrlDecoder().decode(parts[0]), StandardCharsets.UTF_8);
+            String payloadJson = new String(Base64.getUrlDecoder().decode(parts[1]), StandardCharsets.UTF_8);
 
-            // Read and validate the introspection response
-            BufferedReader in = new BufferedReader(new InputStreamReader(connection.getInputStream()));
-            response = in.readLine();
-            if (response.contains("\"active\":true")) {
-                System.out.println("The access token is valid.");
-            } else {
-                System.out.println("The access token is not valid.");
-            }
-            in.close();
+
+            // replace with your method to get the public ke
+
+
+            // Obtain the public key from the X.509 certificate in PEM format
+            byte[] publicKeyBytes = publicKeyString.getBytes(StandardCharsets.UTF_8);
+            CertificateFactory certificateFactory = CertificateFactory.getInstance("X.509");
+            X509Certificate certificate = (X509Certificate) certificateFactory.generateCertificate(new ByteArrayInputStream(publicKeyBytes));
+            PublicKey publicKey = certificate.getPublicKey();
+
+            Signature verifier = Signature.getInstance("SHA256withRSA");
+            byte[] signature = Base64.getUrlDecoder().decode(parts[2]);
+            verifier.initVerify(publicKey);
+            verifier.update((parts[0] + "." + parts[1]).getBytes());
+            boolean verified = verifier.verify(signature);
+            System.out.println("Signature Verified: " + verified);
+
+            JSONObject payload = new JSONObject(payloadJson);
+            String subject = payload.getString("sub");
+
+            // Print the extracted parameters
+            System.out.println("Subject: " + subject);
+            name = subject;
+
+
+            // Extract the claims from the JWT token
+
         } catch (Exception e) {
             e.printStackTrace();
         }
 
-        JSONObject jsonObject = new JSONObject(response);
-        String username = jsonObject.getString("username");
+        String username = name;
         String userId = null;
         AuthenticatedUser authenticatedUser = new AuthenticatedUser();
-        authenticatedUser.setUserName(username.substring(0, username.lastIndexOf("@")));
+        authenticatedUser.setUserName(username);
         authenticatedUser.setUserStoreDomain("PRIMARY");
         authenticatedUser.setTenantDomain(getTenantDomainFromOrganizationId(organizationId));
         RealmService realmService = OrganizationSwitchGrantDataHolder.getInstance().getRealmService();
